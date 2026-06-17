@@ -144,10 +144,4 @@ This project demonstrates:
 
 Keerthana
 
-Python Developer | AI & Data Science Student
-
----
-
-## ⭐ If you like this project
-
-Give this repository a star ⭐ on GitHub.
+Python Developer 
