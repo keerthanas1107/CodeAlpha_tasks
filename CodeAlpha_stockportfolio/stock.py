@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import scrolledtext
 import csv
 from datetime import datetime
 import os
@@ -10,70 +10,96 @@ if os.name != "nt" and os.environ.get("DISPLAY", "") == "":
     sys.exit()
 
 try:
+    import ttkbootstrap as ttb
+    from ttkbootstrap.constants import *
+    from ttkbootstrap.dialogs import Messagebox
+except ImportError:
+    print(
+        "This redesigned UI needs the 'ttkbootstrap' package.\n\n"
+        "Install it with:\n  pip install ttkbootstrap\n\n"
+        "then run this script again."
+    )
+    sys.exit()
+
+try:
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
-# Current live market prices
+# ─────────────────────────────────────────────
+# Data
+# ─────────────────────────────────────────────
+
 STOCK_PRICES = {
-    "AAPL": 180.50,
-    "TSLA": 250.75,
-    "GOOGL": 140.25,
-    "MSFT": 378.90,
-    "AMZN": 175.30,
-    "NVDA": 460.15,
-    "META": 350.60,
-    "NFLX": 485.20,
-    "ORCL": 125.40,
-    "AMD":  115.80
+    "AAPL": 180.50, "TSLA": 250.75, "GOOGL": 140.25, "MSFT": 378.90,
+    "AMZN": 175.30, "NVDA": 460.15, "META": 350.60, "NFLX": 485.20,
+    "ORCL": 125.40, "AMD": 115.80,
 }
 
-# Simulated historical purchase prices (what you originally bought at)
 PURCHASE_PRICES = {
-    "AAPL": 152.30,
-    "TSLA": 210.40,
-    "GOOGL": 118.75,
-    "MSFT": 310.50,
-    "AMZN": 142.60,
-    "NVDA": 280.90,
-    "META": 290.15,
-    "NFLX": 410.30,
-    "ORCL": 108.20,
-    "AMD":  89.45
+    "AAPL": 152.30, "TSLA": 210.40, "GOOGL": 118.75, "MSFT": 310.50,
+    "AMZN": 142.60, "NVDA": 280.90, "META": 290.15, "NFLX": 410.30,
+    "ORCL": 108.20, "AMD": 89.45,
 }
 
 portfolio = {}
 
+# ─────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────
+
 def money(value):
     return f"₹{value:,.2f}"
 
+def shade(hex_color, amount):
+    """Lighten (amount > 0) or darken (amount < 0) a hex color."""
+    hex_color = hex_color.lstrip("#")
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+    r = max(0, min(255, int(r + 255 * amount)))
+    g = max(0, min(255, int(g + 255 * amount)))
+    b = max(0, min(255, int(b + 255 * amount)))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
 def show_error(title, msg):
-    messagebox.showerror(title, msg)
+    Messagebox.show_error(msg, title)
 
 def show_info(title, msg):
-    messagebox.showinfo(title, msg)
+    Messagebox.show_info(msg, title)
 
 def show_warning(title, msg):
-    messagebox.showwarning(title, msg)
+    Messagebox.show_warning(msg, title)
+
+def ask_yes_no(title, msg):
+    return Messagebox.yesno(msg, title) == "Yes"
+
+# ─────────────────────────────────────────────
+# Symbol selection / price preview
+# ─────────────────────────────────────────────
 
 def on_symbol_changed(*_):
-    symbol  = stock_entry.get().upper().strip()
-    current  = STOCK_PRICES.get(symbol)
+    symbol = stock_var.get().upper().strip()
+    current = STOCK_PRICES.get(symbol)
     purchase = PURCHASE_PRICES.get(symbol)
-    purchase_price_var.set(f"{purchase:.2f}" if purchase else "")
-    price_display_label.config(
-        text=f"Buy Price: {money(purchase)}  |  Market: {money(current)}" if current else "Market Price: —",
-        fg="#27ae60" if current else "#888888"
-    )
+
+    if current:
+        buy_price_val.config(text=money(purchase), bootstyle="success")
+        market_price_val.config(text=money(current), bootstyle="info")
+    else:
+        buy_price_val.config(text="—", bootstyle="secondary")
+        market_price_val.config(text="—", bootstyle="secondary")
+
+# ─────────────────────────────────────────────
+# Details panel
+# ─────────────────────────────────────────────
 
 def update_details(stock=None):
     details_text.config(state="normal")
     details_text.delete("1.0", tk.END)
 
     if not portfolio:
-        details_text.insert(tk.END, "Portfolio is empty.\nAdd a stock to see details here.")
+        details_text.insert(tk.END, "Portfolio is empty.\nAdd a stock above to see its details here.")
     elif stock is None:
         details_text.insert(tk.END, "Select a stock from the table to view full details.")
     else:
@@ -81,42 +107,51 @@ def update_details(stock=None):
         if not data:
             details_text.insert(tk.END, "No details available.")
         else:
-            details_text.insert(tk.END, f"Stock Symbol:          {stock}\n")
-            details_text.insert(tk.END, f"Quantity:              {data['quantity']:.2f}\n")
-            details_text.insert(tk.END, f"Avg Purchase Price:    {money(data['purchase_price'])}\n")
-            details_text.insert(tk.END, f"Current Market Price:  {money(data['current_price'])}\n")
-            details_text.insert(tk.END, f"Total Invested:        {money(data['total_invested'])}\n")
-            details_text.insert(tk.END, f"Current Value:         {money(data['current_value'])}\n")
-            details_text.insert(tk.END, f"Profit/Loss:           {money(data['profit_loss'])}\n")
-            details_text.insert(tk.END, f"Profit/Loss %:         {data['profit_loss_pct']:.2f}%\n")
-            details_text.insert(tk.END, f"Updated On:            {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            arrow = "▲" if data["profit_loss"] >= 0 else "▼"
+            details_text.insert(tk.END, f"  Stock Symbol          {stock}\n")
+            details_text.insert(tk.END, f"  Quantity              {data['quantity']:.2f}\n")
+            details_text.insert(tk.END, f"  Avg Purchase Price    {money(data['purchase_price'])}\n")
+            details_text.insert(tk.END, f"  Current Market Price  {money(data['current_price'])}\n")
+            details_text.insert(tk.END, f"  Total Invested        {money(data['total_invested'])}\n")
+            details_text.insert(tk.END, f"  Current Value         {money(data['current_value'])}\n")
+            details_text.insert(tk.END, f"  Profit / Loss         {arrow} {money(abs(data['profit_loss']))}\n")
+            details_text.insert(tk.END, f"  Profit / Loss %       {data['profit_loss_pct']:+.2f}%\n")
+            details_text.insert(tk.END, f"  Updated On            {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     details_text.config(state="disabled")
+
+# ─────────────────────────────────────────────
+# Table
+# ─────────────────────────────────────────────
 
 def refresh_table():
     for row in tree.get_children():
         tree.delete(row)
 
     total_invested = 0
-    total_current  = 0
+    total_current = 0
 
     for stock, data in portfolio.items():
-        current_price   = STOCK_PRICES[stock]
-        current_value   = data["quantity"] * current_price
-        profit_loss     = current_value - data["total_invested"]
+        current_price = STOCK_PRICES[stock]
+        current_value = data["quantity"] * current_price
+        profit_loss = current_value - data["total_invested"]
         profit_loss_pct = (profit_loss / data["total_invested"]) * 100 if data["total_invested"] > 0 else 0
 
-        data["current_price"]   = current_price
-        data["current_value"]   = current_value
-        data["profit_loss"]     = profit_loss
+        data["current_price"] = current_price
+        data["current_value"] = current_value
+        data["profit_loss"] = profit_loss
         data["profit_loss_pct"] = profit_loss_pct
 
         total_invested += data["total_invested"]
-        total_current  += current_value
+        total_current += current_value
 
-    for stock, data in sorted(portfolio.items(), key=lambda item: item[1]["current_value"], reverse=True):
+    for i, (stock, data) in enumerate(
+        sorted(portfolio.items(), key=lambda item: item[1]["current_value"], reverse=True)
+    ):
         allocation = (data["current_value"] / total_current) * 100 if total_current > 0 else 0
         pl_val = data["profit_loss"]
+        row_tag = "evenrow" if i % 2 == 0 else "oddrow"
+        pl_tag = "gain" if pl_val >= 0 else "loss"
         tree.insert("", "end", values=(
             stock,
             f"{data['quantity']:.2f}",
@@ -124,18 +159,19 @@ def refresh_table():
             money(data["current_price"]),
             money(data["total_invested"]),
             money(data["current_value"]),
-            money(pl_val),
-            f"{data['profit_loss_pct']:.2f}%",
-            f"{allocation:.2f}%"
-        ))
+            f"{'+' if pl_val >= 0 else ''}{money(pl_val)}",
+            f"{data['profit_loss_pct']:+.2f}%",
+            f"{allocation:.2f}%",
+        ), tags=(row_tag, pl_tag))
 
-    invested_label.config(text=f"Total Invested: {money(total_invested)}")
-    current_label.config(text=f"Current Value:  {money(total_current)}")
+    invested_val.config(text=money(total_invested))
+    current_val.config(text=money(total_current))
 
     net_pl = total_current - total_invested
-    profit_label.config(
-        text=f"Profit/Loss: {money(net_pl)}",
-        fg="#27ae60" if net_pl >= 0 else "#e74c3c"
+    pl_card.config(bg=colors.success if net_pl >= 0 else colors.danger)
+    pl_val_label.config(
+        text=f"{'+' if net_pl >= 0 else ''}{money(net_pl)}",
+        bootstyle="inverse-success" if net_pl >= 0 else "inverse-danger",
     )
 
     if portfolio:
@@ -146,6 +182,10 @@ def refresh_table():
 
     update_statistics()
 
+# ─────────────────────────────────────────────
+# Validation
+# ─────────────────────────────────────────────
+
 def get_positive_float(value_text, field_name):
     try:
         value = float(value_text)
@@ -155,9 +195,13 @@ def get_positive_float(value_text, field_name):
     except ValueError:
         raise ValueError(f"Please enter a valid positive number for {field_name}.")
 
+# ─────────────────────────────────────────────
+# Portfolio actions
+# ─────────────────────────────────────────────
+
 def add_stock():
-    stock    = stock_entry.get().upper().strip()
-    qty_text = quantity_entry.get().strip()
+    stock = stock_var.get().upper().strip()
+    qty_text = quantity_var.get().strip()
 
     if not stock:
         show_error("Error", "Stock symbol cannot be empty.")
@@ -173,36 +217,35 @@ def add_stock():
         show_error("Input Error", str(e))
         return
 
-    # Purchase price comes from historical PURCHASE_PRICES
     purchase_price = PURCHASE_PRICES[stock]
 
     if stock in portfolio:
-        old_qty      = portfolio[stock]["quantity"]
+        old_qty = portfolio[stock]["quantity"]
         old_invested = portfolio[stock]["total_invested"]
         new_invested = quantity * purchase_price
-        total_qty    = old_qty + quantity
-        portfolio[stock]["quantity"]       = total_qty
+        total_qty = old_qty + quantity
+        portfolio[stock]["quantity"] = total_qty
         portfolio[stock]["total_invested"] = old_invested + new_invested
         portfolio[stock]["purchase_price"] = portfolio[stock]["total_invested"] / total_qty
     else:
         portfolio[stock] = {
-            "quantity":       quantity,
+            "quantity": quantity,
             "purchase_price": purchase_price,
-            "total_invested": quantity * purchase_price
+            "total_invested": quantity * purchase_price,
         }
 
-    stock_entry.delete(0, tk.END)
-    quantity_entry.delete(0, tk.END)
-    purchase_price_var.set("")
-    price_display_label.config(text="Market Price: —", fg="#888888")
+    stock_var.set("")
+    quantity_var.set("")
+    buy_price_val.config(text="—", bootstyle="secondary")
+    market_price_val.config(text="—", bootstyle="secondary")
 
     refresh_table()
     show_info("Success", f"{stock} added!\n\nBought at:     {money(purchase_price)}\nMarket Price:  {money(STOCK_PRICES[stock])}\nQty:           {quantity:.2f}")
 
 def remove_stock():
-    stock = stock_entry.get().upper().strip()
+    stock = stock_var.get().upper().strip()
     if not stock:
-        show_error("Error", "Enter a stock symbol to remove.")
+        show_error("Error", "Enter or select a stock symbol to remove.")
         return
 
     if stock in portfolio:
@@ -217,11 +260,9 @@ def clear_portfolio():
         show_warning("Warning", "Portfolio is already empty.")
         return
 
-    if messagebox.askyesno("Confirm", "Do you want to clear the entire portfolio?"):
+    if ask_yes_no("Confirm", "Do you want to clear the entire portfolio?"):
         portfolio.clear()
         refresh_table()
-        update_details()
-        update_statistics()
         show_info("Cleared", "Portfolio cleared successfully.")
 
 def save_portfolio():
@@ -233,20 +274,20 @@ def save_portfolio():
         with open("portfolio.csv", "w", newline="") as file:
             fieldnames = [
                 "stock", "quantity", "purchase_price", "current_price",
-                "total_invested", "current_value", "profit_loss", "profit_loss_pct"
+                "total_invested", "current_value", "profit_loss", "profit_loss_pct",
             ]
             writer = csv.DictWriter(file, fieldnames=fieldnames)
             writer.writeheader()
             for stock, data in portfolio.items():
                 writer.writerow({
-                    "stock":           stock,
-                    "quantity":        data["quantity"],
-                    "purchase_price":  data["purchase_price"],
-                    "current_price":   data["current_price"],
-                    "total_invested":  data["total_invested"],
-                    "current_value":   data["current_value"],
-                    "profit_loss":     data["profit_loss"],
-                    "profit_loss_pct": data["profit_loss_pct"]
+                    "stock": stock,
+                    "quantity": data["quantity"],
+                    "purchase_price": data["purchase_price"],
+                    "current_price": data["current_price"],
+                    "total_invested": data["total_invested"],
+                    "current_value": data["current_value"],
+                    "profit_loss": data["profit_loss"],
+                    "profit_loss_pct": data["profit_loss_pct"],
                 })
         show_info("Saved", "Portfolio saved to portfolio.csv successfully.")
     except Exception as e:
@@ -262,13 +303,13 @@ def load_portfolio():
                 if stock not in STOCK_PRICES:
                     continue
                 loaded[stock] = {
-                    "quantity":        float(row["quantity"]),
-                    "purchase_price":  float(row["purchase_price"]),
-                    "total_invested":  float(row["total_invested"]),
-                    "current_price":   float(row["current_price"]),
-                    "current_value":   float(row["current_value"]),
-                    "profit_loss":     float(row["profit_loss"]),
-                    "profit_loss_pct": float(row["profit_loss_pct"])
+                    "quantity": float(row["quantity"]),
+                    "purchase_price": float(row["purchase_price"]),
+                    "total_invested": float(row["total_invested"]),
+                    "current_price": float(row["current_price"]),
+                    "current_value": float(row["current_value"]),
+                    "profit_loss": float(row["profit_loss"]),
+                    "profit_loss_pct": float(row["profit_loss_pct"]),
                 }
 
         portfolio.clear()
@@ -281,13 +322,30 @@ def load_portfolio():
         show_error("Load Error", f"Could not load file.\n{e}")
 
 def show_available_stocks():
-    info = "Available Stocks\n"
-    info += "─" * 38 + "\n"
-    info += f"{'Symbol':<8}  {'Buy Price':>12}  {'Market Price':>12}\n"
-    info += "─" * 38 + "\n"
-    for stock in STOCK_PRICES:
-        info += f"{stock:<8}  {money(PURCHASE_PRICES[stock]):>12}  {money(STOCK_PRICES[stock]):>12}\n"
-    messagebox.showinfo("Stock Prices", info)
+    win = ttb.Toplevel(title="Available Stocks")
+    win.geometry("520x460")
+
+    ttb.Label(win, text="Available Stocks", font=("Segoe UI", 15, "bold")).pack(pady=(14, 2))
+    ttb.Label(win, text="Buy price vs. current market price", bootstyle="secondary").pack(pady=(0, 10))
+
+    cols = ("Symbol", "Buy Price", "Market Price", "Change %")
+    price_tree = ttb.Treeview(win, columns=cols, show="headings", height=10, bootstyle="info")
+    for c in cols:
+        price_tree.heading(c, text=c)
+        price_tree.column(c, anchor="center", width=110)
+    price_tree.tag_configure("gain", foreground=colors.success)
+    price_tree.tag_configure("loss", foreground=colors.danger)
+
+    for stock in sorted(STOCK_PRICES):
+        buy = PURCHASE_PRICES[stock]
+        mkt = STOCK_PRICES[stock]
+        change = (mkt - buy) / buy * 100
+        price_tree.insert("", "end", values=(
+            stock, money(buy), money(mkt), f"{change:+.2f}%"
+        ), tags=("gain" if change >= 0 else "loss",))
+
+    price_tree.pack(fill="both", expand=True, padx=16, pady=8)
+    ttb.Button(win, text="Close", command=win.destroy, bootstyle="secondary", width=12).pack(pady=12)
 
 def on_tree_select(event):
     selected = tree.focus()
@@ -297,10 +355,11 @@ def on_tree_select(event):
     if not values:
         return
     stock = values[0]
+    stock_var.set(stock)
     update_details(stock)
 
 # ─────────────────────────────────────────────
-# FEATURE 1: Statistics Dashboard
+# Statistics dashboard
 # ─────────────────────────────────────────────
 
 def get_stats():
@@ -308,21 +367,21 @@ def get_stats():
         return None
 
     total_invested = sum(d["total_invested"] for d in portfolio.values())
-    total_current  = sum(d.get("current_value", d["quantity"] * STOCK_PRICES[s]) for s, d in portfolio.items())
+    total_current = sum(d.get("current_value", d["quantity"] * STOCK_PRICES[s]) for s, d in portfolio.items())
     portfolio_return_pct = ((total_current - total_invested) / total_invested * 100) if total_invested > 0 else 0
 
-    best_stock  = max(portfolio.items(), key=lambda x: x[1].get("profit_loss_pct", 0))
+    best_stock = max(portfolio.items(), key=lambda x: x[1].get("profit_loss_pct", 0))
     worst_stock = min(portfolio.items(), key=lambda x: x[1].get("profit_loss_pct", 0))
 
     return {
-        "total_stocks":         len(portfolio),
-        "best_performer":       best_stock[0],
-        "best_pct":             best_stock[1].get("profit_loss_pct", 0),
-        "worst_performer":      worst_stock[0],
-        "worst_pct":            worst_stock[1].get("profit_loss_pct", 0),
+        "total_stocks": len(portfolio),
+        "best_performer": best_stock[0],
+        "best_pct": best_stock[1].get("profit_loss_pct", 0),
+        "worst_performer": worst_stock[0],
+        "worst_pct": worst_stock[1].get("profit_loss_pct", 0),
         "portfolio_return_pct": portfolio_return_pct,
-        "total_invested":       total_invested,
-        "total_current":        total_current,
+        "total_invested": total_invested,
+        "total_current": total_current,
     }
 
 def update_statistics():
@@ -332,25 +391,27 @@ def update_statistics():
         stat_best_val.config(text="—")
         stat_worst_val.config(text="—")
         stat_return_val.config(text="0.00%")
+        return_card.config(bg=colors.primary)
+        stat_return_val.config(bootstyle="inverse-primary")
         return
 
     stat_stocks_val.config(text=str(stats["total_stocks"]))
-    stat_best_val.config(
-        text=f"{stats['best_performer']}  ({stats['best_pct']:+.2f}%)",
-        fg="#27ae60"
-    )
-    stat_worst_val.config(
-        text=f"{stats['worst_performer']}  ({stats['worst_pct']:+.2f}%)",
-        fg="#e74c3c"
-    )
+    stat_best_val.config(text=f"{stats['best_performer']}  {stats['best_pct']:+.2f}%")
+    stat_worst_val.config(text=f"{stats['worst_performer']}  {stats['worst_pct']:+.2f}%")
+
     ret = stats["portfolio_return_pct"]
-    stat_return_val.config(
-        text=f"{ret:+.2f}%",
-        fg="#27ae60" if ret >= 0 else "#e74c3c"
-    )
+    stat_return_val.config(text=f"{ret:+.2f}%")
+    if ret >= 0:
+        return_card.config(bg=colors.success)
+        stat_return_val.config(bootstyle="inverse-success")
+        return_icon.config(bg=colors.success, bootstyle="inverse-success")
+    else:
+        return_card.config(bg=colors.danger)
+        stat_return_val.config(bootstyle="inverse-danger")
+        return_icon.config(bg=colors.danger, bootstyle="inverse-danger")
 
 # ─────────────────────────────────────────────
-# FEATURE 2: TXT Export Report
+# TXT export report
 # ─────────────────────────────────────────────
 
 def export_txt_report():
@@ -358,7 +419,7 @@ def export_txt_report():
         show_warning("Warning", "Portfolio is empty. Nothing to export.")
         return
 
-    stats    = get_stats()
+    stats = get_stats()
     filename = f"portfolio_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
 
     try:
@@ -411,7 +472,7 @@ def export_txt_report():
         show_error("Export Error", f"Could not export report.\n{e}")
 
 # ─────────────────────────────────────────────
-# FEATURE 3: Pie Chart
+# Pie chart
 # ─────────────────────────────────────────────
 
 def show_pie_chart():
@@ -422,7 +483,7 @@ def show_pie_chart():
     if not MATPLOTLIB_AVAILABLE:
         show_error(
             "Missing Library",
-            "matplotlib is not installed.\n\nPlease run:\n  pip install matplotlib\n\nthen restart."
+            "matplotlib is not installed.\n\nPlease run:\n  pip install matplotlib\n\nthen restart.",
         )
         return
 
@@ -437,166 +498,205 @@ def show_pie_chart():
         labels.append(stock)
         sizes.append(val)
 
-    chart_window = tk.Toplevel(root)
-    chart_window.title("Portfolio Allocation – Pie Chart")
-    chart_window.geometry("700x560")
-    chart_window.config(bg="#f4f4f4")
+    chart_window = ttb.Toplevel(title="Portfolio Allocation")
+    chart_window.geometry("700x580")
 
-    tk.Label(chart_window, text="Portfolio Allocation",
-             font=("Arial", 16, "bold"), bg="#f4f4f4").pack(pady=(10, 0))
+    ttb.Label(chart_window, text="Portfolio Allocation", font=("Segoe UI", 16, "bold")).pack(pady=(12, 0))
+    ttb.Label(chart_window, text=f"Total Value: {money(total_current)}", bootstyle="secondary").pack(pady=(0, 6))
 
-    fig, ax = plt.subplots(figsize=(6.5, 5), facecolor="#f4f4f4")
-    colors = plt.cm.Set3.colors[:len(labels)]  # type: ignore
+    palette = [colors.primary, colors.success, colors.info, colors.warning,
+               colors.danger, colors.secondary, "#9b59b6", "#16a085", "#e67e22", "#2ecc71"]
+    wedge_colors = [palette[i % len(palette)] for i in range(len(labels))]
+
+    fig, ax = plt.subplots(figsize=(6.5, 5), facecolor=colors.bg)
+    ax.set_facecolor(colors.bg)
     wedges, texts, autotexts = ax.pie(
         sizes, labels=labels, autopct="%1.1f%%", startangle=140,
-        colors=colors, pctdistance=0.82,
-        wedgeprops=dict(width=0.6, edgecolor="white", linewidth=1.5)
+        colors=wedge_colors, pctdistance=0.82,
+        wedgeprops=dict(width=0.6, edgecolor=colors.bg, linewidth=2),
+        textprops=dict(color=colors.fg),
     )
     for at in autotexts:
         at.set_fontsize(9)
+        at.set_color(colors.bg)
+        at.set_fontweight("bold")
     for t in texts:
         t.set_fontsize(10)
-
-    ax.set_title(f"Total Value: {money(total_current)}", fontsize=11, pad=12, color="#333333")
+        t.set_color(colors.fg)
 
     canvas = FigureCanvasTkAgg(fig, master=chart_window)
     canvas.draw()
     canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=5)
 
-    tk.Button(chart_window, text="Close", command=chart_window.destroy,
-              bg="#e74c3c", fg="white", width=10).pack(pady=8)
+    ttb.Button(chart_window, text="Close", command=chart_window.destroy, bootstyle="danger", width=12).pack(pady=10)
 
 # ─────────────────────────────────────────────
 # GUI Layout
 # ─────────────────────────────────────────────
 
-root = tk.Tk()
-root.title("Stock Portfolio Tracker")
-root.geometry("1200x900")
-root.config(bg="#f4f4f4")
+root = ttb.Window(title="Stock Portfolio Tracker", themename="darkly", size=(1300, 920))
+style = root.style
+colors = style.colors
 
-tk.Label(root, text="Stock Portfolio Tracker",
-         font=("Arial", 20, "bold"), bg="#f4f4f4").pack(pady=10)
+MAIN_PAD = 22
 
-# ── Input Row ────────────────────────────────
-top_frame = tk.Frame(root, bg="#f4f4f4")
-top_frame.pack(pady=5)
+# ── Header ────────────────────────────────────
+header = ttb.Frame(root, padding=(MAIN_PAD, 18, MAIN_PAD, 6))
+header.pack(fill="x")
 
-tk.Label(top_frame, text="Stock Symbol:", bg="#f4f4f4").grid(row=0, column=0, padx=5, pady=5)
-stock_entry = tk.Entry(top_frame, width=15)
-stock_entry.grid(row=0, column=1, padx=5, pady=5)
+ttb.Label(header, text="📈 Stock Portfolio Tracker", font=("Segoe UI", 22, "bold")).pack(side="left")
+ttb.Label(header, text="Track your investments, profits and allocation in real time",
+          bootstyle="secondary").pack(side="left", padx=(14, 0), pady=(8, 0))
 
-tk.Label(top_frame, text="Quantity:", bg="#f4f4f4").grid(row=0, column=2, padx=5, pady=5)
-quantity_entry = tk.Entry(top_frame, width=15)
-quantity_entry.grid(row=0, column=3, padx=5, pady=5)
+ttb.Separator(root).pack(fill="x", padx=MAIN_PAD)
 
-tk.Label(top_frame, text="Purchase Price (Auto):", bg="#f4f4f4").grid(row=0, column=4, padx=5, pady=5)
-purchase_price_var = tk.StringVar()
-purchase_price_display = tk.Entry(
-    top_frame, textvariable=purchase_price_var,
-    width=15, state="readonly",
-    readonlybackground="#e8f5e9", fg="#27ae60",
-    font=("Arial", 10, "bold")
-)
-purchase_price_display.grid(row=0, column=5, padx=5, pady=5)
+# ── Add to portfolio card ─────────────────────
+add_card = ttb.Labelframe(root, text="  Add to Portfolio  ", padding=16, bootstyle="primary")
+add_card.pack(fill="x", padx=MAIN_PAD, pady=14)
 
-price_display_label = tk.Label(top_frame, text="Market Price: —",
-                                font=("Arial", 9), bg="#f4f4f4", fg="#888888")
-price_display_label.grid(row=1, column=4, columnspan=2, pady=(0, 4))
+ttb.Label(add_card, text="Stock Symbol").grid(row=0, column=0, padx=(0, 8), pady=4, sticky="w")
+stock_var = tk.StringVar()
+stock_combo = ttb.Combobox(add_card, textvariable=stock_var, width=14,
+                            values=sorted(STOCK_PRICES.keys()), bootstyle="primary")
+stock_combo.grid(row=1, column=0, padx=(0, 20), sticky="w")
+stock_var.trace_add("write", on_symbol_changed)
+stock_combo.bind("<<ComboboxSelected>>", on_symbol_changed)
 
-stock_entry_var = tk.StringVar()
-stock_entry.config(textvariable=stock_entry_var)
-stock_entry_var.trace_add("write", on_symbol_changed)
+ttb.Label(add_card, text="Quantity").grid(row=0, column=1, padx=(0, 8), pady=4, sticky="w")
+quantity_var = tk.StringVar()
+quantity_entry = ttb.Entry(add_card, textvariable=quantity_var, width=14, bootstyle="primary")
+quantity_entry.grid(row=1, column=1, padx=(0, 20), sticky="w")
 
-# ── Action Buttons ───────────────────────────
-button_frame = tk.Frame(root, bg="#f4f4f4")
-button_frame.pack(pady=10)
+ttb.Label(add_card, text="Buy Price").grid(row=0, column=2, padx=(0, 8), pady=4, sticky="w")
+buy_price_val = ttb.Label(add_card, text="—", font=("Segoe UI", 11, "bold"), bootstyle="secondary")
+buy_price_val.grid(row=1, column=2, padx=(0, 20), sticky="w")
 
-tk.Button(button_frame, text="Add Stock",    command=add_stock,             width=12, bg="#4CAF50", fg="white").grid(row=0, column=0, padx=5)
-tk.Button(button_frame, text="Remove Stock", command=remove_stock,          width=12, bg="#f39c12", fg="white").grid(row=0, column=1, padx=5)
-tk.Button(button_frame, text="Clear",        command=clear_portfolio,       width=12, bg="#e74c3c", fg="white").grid(row=0, column=2, padx=5)
-tk.Button(button_frame, text="Save",         command=save_portfolio,        width=12, bg="#3498db", fg="white").grid(row=0, column=3, padx=5)
-tk.Button(button_frame, text="Load",         command=load_portfolio,        width=12, bg="#9b59b6", fg="white").grid(row=0, column=4, padx=5)
-tk.Button(button_frame, text="Show Prices",  command=show_available_stocks, width=12, bg="#34495e", fg="white").grid(row=0, column=5, padx=5)
+ttb.Label(add_card, text="Market Price").grid(row=0, column=3, padx=(0, 8), pady=4, sticky="w")
+market_price_val = ttb.Label(add_card, text="—", font=("Segoe UI", 11, "bold"), bootstyle="secondary")
+market_price_val.grid(row=1, column=3, padx=(0, 24), sticky="w")
 
-# ── Feature Buttons ───────────────────────────
-feature_frame = tk.Frame(root, bg="#f4f4f4")
-feature_frame.pack(pady=4)
+btn_row = ttb.Frame(add_card)
+btn_row.grid(row=1, column=4, sticky="e")
+add_card.grid_columnconfigure(5, weight=1)
 
-tk.Button(feature_frame, text="Export TXT Report", command=export_txt_report, width=18, bg="#16a085", fg="white").grid(row=0, column=0, padx=8)
-tk.Button(feature_frame, text="Pie Chart",          command=show_pie_chart,   width=18, bg="#8e44ad", fg="white").grid(row=0, column=1, padx=8)
+ttb.Button(btn_row, text="➕ Add", command=add_stock, bootstyle="success", width=10).pack(side="left", padx=4)
+ttb.Button(btn_row, text="➖ Remove", command=remove_stock, bootstyle="warning", width=10).pack(side="left", padx=4)
 
-# ── Statistics Dashboard ─────────────────────
-stats_outer = tk.LabelFrame(root, text="  Statistics Dashboard  ",
-                              font=("Arial", 11, "bold"),
-                              bg="#f4f4f4", fg="#2c3e50", bd=2, relief="groove")
-stats_outer.pack(pady=6, padx=20, fill="x")
+# ── Secondary toolbar ──────────────────────────
+toolbar = ttb.Frame(root, padding=(MAIN_PAD, 0, MAIN_PAD, 6))
+toolbar.pack(fill="x")
 
-stats_inner = tk.Frame(stats_outer, bg="#f4f4f4")
-stats_inner.pack(pady=6)
+ttb.Button(toolbar, text="🗑 Clear Portfolio", command=clear_portfolio, bootstyle="danger-outline").pack(side="left", padx=4)
+ttb.Button(toolbar, text="💾 Save", command=save_portfolio, bootstyle="info-outline").pack(side="left", padx=4)
+ttb.Button(toolbar, text="📂 Load", command=load_portfolio, bootstyle="info-outline").pack(side="left", padx=4)
+ttb.Button(toolbar, text="📋 Show Prices", command=show_available_stocks, bootstyle="secondary-outline").pack(side="left", padx=4)
+ttb.Button(toolbar, text="📄 Export Report", command=export_txt_report, bootstyle="primary-outline").pack(side="left", padx=4)
+ttb.Button(toolbar, text="🥧 Pie Chart", command=show_pie_chart, bootstyle="primary-outline").pack(side="left", padx=4)
 
-STAT_FONT_LBL = ("Arial", 10, "bold")
-STAT_FONT_VAL = ("Arial", 11)
+# ── Statistics dashboard ───────────────────────
+stats_section = ttb.Frame(root, padding=(MAIN_PAD, 6, MAIN_PAD, 6))
+stats_section.pack(fill="x")
 
-tk.Label(stats_inner, text="Total Stocks:",       font=STAT_FONT_LBL, bg="#f4f4f4", fg="#555").grid(row=0, column=0, padx=18, sticky="e")
-stat_stocks_val = tk.Label(stats_inner, text="0", font=("Arial", 11, "bold"), bg="#f4f4f4", fg="#2c3e50")
-stat_stocks_val.grid(row=0, column=1, padx=6, sticky="w")
+for i in range(4):
+    stats_section.grid_columnconfigure(i, weight=1, uniform="card")
 
-tk.Label(stats_inner, text="Best Performer:",     font=STAT_FONT_LBL, bg="#f4f4f4", fg="#555").grid(row=0, column=2, padx=18, sticky="e")
-stat_best_val = tk.Label(stats_inner, text="—",   font=STAT_FONT_VAL, bg="#f4f4f4", fg="#27ae60")
-stat_best_val.grid(row=0, column=3, padx=6, sticky="w")
+def make_stat_card(parent, col, icon, label, bg):
+    card = tk.Frame(parent, bg=bg, bd=0)
+    card.grid(row=0, column=col, padx=8, sticky="nsew")
+    inner = tk.Frame(card, bg=bg)
+    inner.pack(fill="both", expand=True, padx=16, pady=14)
+    icon_lbl = ttb.Label(inner, text=icon, font=("Segoe UI", 18), bootstyle=f"inverse-{bg_name}" if False else None)
+    icon_lbl.pack(anchor="w")
+    value_lbl = ttb.Label(inner, text="0", font=("Segoe UI", 17, "bold"))
+    value_lbl.pack(anchor="w", pady=(2, 0))
+    text_lbl = ttb.Label(inner, text=label, font=("Segoe UI", 9))
+    text_lbl.pack(anchor="w")
+    return card, icon_lbl, value_lbl, text_lbl
 
-tk.Label(stats_inner, text="Worst Performer:",    font=STAT_FONT_LBL, bg="#f4f4f4", fg="#555").grid(row=0, column=4, padx=18, sticky="e")
-stat_worst_val = tk.Label(stats_inner, text="—",  font=STAT_FONT_VAL, bg="#f4f4f4", fg="#e74c3c")
-stat_worst_val.grid(row=0, column=5, padx=6, sticky="w")
+stocks_card, stocks_icon, stat_stocks_val, _ = make_stat_card(stats_section, 0, "📦", "Total Stocks", colors.secondary)
+stocks_icon.config(bootstyle="inverse-secondary")
+stat_stocks_val.config(bootstyle="inverse-secondary")
+stats_section.children[stocks_card.winfo_name()]  # keep ref alive (no-op)
+for w in stocks_card.winfo_children()[0].winfo_children():
+    if isinstance(w, ttb.Label) and w not in (stocks_icon, stat_stocks_val):
+        w.config(bootstyle="inverse-secondary")
 
-tk.Label(stats_inner, text="Portfolio Return %:", font=STAT_FONT_LBL, bg="#f4f4f4", fg="#555").grid(row=0, column=6, padx=18, sticky="e")
-stat_return_val = tk.Label(stats_inner, text="0.00%", font=("Arial", 11, "bold"), bg="#f4f4f4", fg="#2c3e50")
-stat_return_val.grid(row=0, column=7, padx=6, sticky="w")
+best_card, best_icon, stat_best_val, best_text = make_stat_card(stats_section, 1, "🏆", "Best Performer", colors.success)
+best_icon.config(bootstyle="inverse-success")
+stat_best_val.config(bootstyle="inverse-success")
+best_text.config(bootstyle="inverse-success")
 
-# ── Portfolio Table ───────────────────────────
-table_frame = tk.Frame(root, bg="#f4f4f4")
-table_frame.pack(pady=10, fill="both", expand=True)
+worst_card, worst_icon, stat_worst_val, worst_text = make_stat_card(stats_section, 2, "📉", "Worst Performer", colors.danger)
+worst_icon.config(bootstyle="inverse-danger")
+stat_worst_val.config(bootstyle="inverse-danger")
+worst_text.config(bootstyle="inverse-danger")
+
+return_card, return_icon, stat_return_val, return_text = make_stat_card(stats_section, 3, "📊", "Portfolio Return", colors.primary)
+return_icon.config(bootstyle="inverse-primary")
+stat_return_val.config(bootstyle="inverse-primary")
+return_text.config(bootstyle="inverse-primary")
+
+# ── Portfolio table ─────────────────────────────
+table_card = ttb.Labelframe(root, text="  Holdings  ", padding=10, bootstyle="secondary")
+table_card.pack(fill="both", expand=True, padx=MAIN_PAD, pady=10)
+
+table_frame = ttb.Frame(table_card)
+table_frame.pack(fill="both", expand=True)
 
 columns = ("Stock", "Qty", "Avg Buy", "Current", "Invested", "Value", "P/L", "P/L %", "Alloc %")
-tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=12)
+tree = ttb.Treeview(table_frame, columns=columns, show="headings", height=11, bootstyle="primary")
 
 for col in columns:
     tree.heading(col, text=col)
     tree.column(col, width=110, anchor="center")
 
-scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
+tree.tag_configure("evenrow", background=colors.bg)
+tree.tag_configure("oddrow", background=shade(colors.bg, 0.04))
+tree.tag_configure("gain", foreground=colors.success)
+tree.tag_configure("loss", foreground=colors.danger)
+
+scrollbar = ttb.Scrollbar(table_frame, orient="vertical", command=tree.yview, bootstyle="round")
 tree.configure(yscrollcommand=scrollbar.set)
 tree.pack(side="left", fill="both", expand=True)
 scrollbar.pack(side="right", fill="y")
 
 tree.bind("<<TreeviewSelect>>", on_tree_select)
 
-# ── Summary Labels ────────────────────────────
-summary_frame = tk.Frame(root, bg="#f4f4f4")
-summary_frame.pack(pady=5)
+# ── Summary footer ──────────────────────────────
+summary_frame = ttb.Frame(root, padding=(MAIN_PAD, 0, MAIN_PAD, 14))
+summary_frame.pack(fill="x")
 
-invested_label = tk.Label(summary_frame, text="Total Invested: ₹0.00",
-                           font=("Arial", 12, "bold"), bg="#f4f4f4", fg="#2c3e50")
-invested_label.grid(row=0, column=0, padx=20)
+def make_pill(parent, label, bg):
+    card = tk.Frame(parent, bg=bg)
+    card.pack(side="left", padx=8, fill="x", expand=True)
+    inner = tk.Frame(card, bg=bg)
+    inner.pack(padx=18, pady=10)
+    ttb.Label(inner, text=label, font=("Segoe UI", 9), bootstyle="inverse-secondary" if bg == colors.secondary else None).pack(anchor="w")
+    val = ttb.Label(inner, text=money(0), font=("Segoe UI", 14, "bold"))
+    val.pack(anchor="w")
+    return card, val
 
-current_label = tk.Label(summary_frame, text="Current Value:  ₹0.00",
-                          font=("Arial", 12, "bold"), bg="#f4f4f4", fg="#2c3e50")
-current_label.grid(row=0, column=1, padx=20)
+invested_card, invested_val = make_pill(summary_frame, "Total Invested", colors.dark)
+current_card, current_val = make_pill(summary_frame, "Current Value", colors.dark)
+pl_card, pl_val_label = make_pill(summary_frame, "Profit / Loss", colors.success)
 
-profit_label = tk.Label(summary_frame, text="Profit/Loss: ₹0.00",
-                         font=("Arial", 12, "bold"), bg="#f4f4f4", fg="#2c3e50")
-profit_label.grid(row=0, column=2, padx=20)
+for lbl in invested_card.winfo_children()[0].winfo_children():
+    lbl.config(bootstyle="inverse-dark")
+for lbl in current_card.winfo_children()[0].winfo_children():
+    lbl.config(bootstyle="inverse-dark")
+for lbl in pl_card.winfo_children()[0].winfo_children():
+    lbl.config(bootstyle="inverse-success")
 
-# ── Stock Details Panel ───────────────────────
-details_frame = tk.Frame(root, bg="#ffffff", bd=2, relief="groove")
-details_frame.pack(pady=10, fill="both", expand=False, padx=20)
+# ── Stock details panel ─────────────────────────
+details_card = ttb.Labelframe(root, text="  Stock Details  ", padding=10, bootstyle="secondary")
+details_card.pack(fill="both", expand=False, padx=MAIN_PAD, pady=(0, 18))
 
-tk.Label(details_frame, text="Stock Details",
-         font=("Arial", 14, "bold"), bg="#ffffff").pack(pady=5)
-
-details_text = tk.Text(details_frame, height=8, width=120, font=("Consolas", 11))
-details_text.pack(padx=10, pady=10, fill="both", expand=True)
+details_text = scrolledtext.ScrolledText(
+    details_card, height=9, font=("Consolas", 11),
+    bg=colors.bg, fg=colors.fg, insertbackground=colors.fg,
+    relief="flat", borderwidth=0,
+)
+details_text.pack(fill="both", expand=True, padx=4, pady=4)
 details_text.config(state="disabled")
 
 update_details()
